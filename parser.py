@@ -6,6 +6,7 @@ from typing import List, Dict, Tuple
 from collections import defaultdict
 import matplotlib.pyplot as plt
 from textblob import TextBlob
+from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 class WhatsAppChatParser:
     def __init__(self, file_path: str):
@@ -13,6 +14,7 @@ class WhatsAppChatParser:
         self.file_path = file_path
         self.messages = []
         self.df = None
+        self.sentiment_analyzer = SentimentIntensityAnalyzer()
         self._parse_chat()
     
     def _parse_chat(self):
@@ -83,18 +85,75 @@ class WhatsAppChatParser:
         
         return {k: np.mean(v) for k, v in response_times.items() if v}
     
+    def analyze_message_sentiment(self, message: str) -> Dict:
+        """Analyze sentiment of a single message using VADER."""
+        scores = self.sentiment_analyzer.polarity_scores(message)
+        return {
+            'compound': scores['compound'],  # Overall sentiment (-1 to 1)
+            'pos': scores['pos'],           # Positive component (0 to 1)
+            'neu': scores['neu'],           # Neutral component (0 to 1)
+            'neg': scores['neg']            # Negative component (0 to 1)
+        }
+
     def sentiment_analysis(self) -> Dict:
         """Perform sentiment analysis on messages."""
-        self.df['sentiment'] = self.df['message'].apply(lambda x: TextBlob(x).sentiment.polarity)
+        # Add sentiment scores to DataFrame
+        self.df['sentiment_scores'] = self.df['message'].apply(self.analyze_message_sentiment)
+        self.df['sentiment'] = self.df['sentiment_scores'].apply(lambda x: x['compound'])
         
+        # Calculate overall sentiment statistics
         sentiment_stats = {
             'overall_sentiment': self.df['sentiment'].mean(),
             'sentiment_by_sender': self.df.groupby('sender')['sentiment'].mean().to_dict(),
             'most_positive_msg': self.df.loc[self.df['sentiment'].idxmax()].to_dict(),
-            'most_negative_msg': self.df.loc[self.df['sentiment'].idxmin()].to_dict()
+            'most_negative_msg': self.df.loc[self.df['sentiment'].idxmin()].to_dict(),
+            'sentiment_distribution': {
+                'positive': len(self.df[self.df['sentiment'] > 0.05]) / len(self.df),
+                'negative': len(self.df[self.df['sentiment'] < -0.05]) / len(self.df),
+                'neutral': len(self.df[(self.df['sentiment'] >= -0.05) & (self.df['sentiment'] <= 0.05)]) / len(self.df)
+            }
         }
         
         return sentiment_stats
+
+    def analyze_conversation_sentiment(self, conversation_df: pd.DataFrame) -> Dict:
+        """Analyze sentiment patterns within a conversation."""
+        # Add sentiment scores if not already present
+        if 'sentiment_scores' not in conversation_df.columns:
+            conversation_df['sentiment_scores'] = conversation_df['message'].apply(self.analyze_message_sentiment)
+            conversation_df['sentiment'] = conversation_df['sentiment_scores'].apply(lambda x: x['compound'])
+        
+        # Calculate various sentiment metrics
+        sentiment_analysis = {
+            'overall_sentiment': conversation_df['sentiment'].mean(),
+            'sentiment_by_sender': conversation_df.groupby('sender')['sentiment'].agg(['mean', 'std']).to_dict('index'),
+            'sentiment_distribution': {
+                'positive': len(conversation_df[conversation_df['sentiment'] > 0.05]) / len(conversation_df),
+                'negative': len(conversation_df[conversation_df['sentiment'] < -0.05]) / len(conversation_df),
+                'neutral': len(conversation_df[(conversation_df['sentiment'] >= -0.05) & (conversation_df['sentiment'] <= 0.05)]) / len(conversation_df)
+            },
+            'sentiment_progression': conversation_df[['timestamp', 'sentiment']].values.tolist(),
+            'most_positive_msg': conversation_df.loc[conversation_df['sentiment'].idxmax()].to_dict(),
+            'most_negative_msg': conversation_df.loc[conversation_df['sentiment'].idxmin()].to_dict(),
+            'sentiment_stats': {
+                'mean': conversation_df['sentiment'].mean(),
+                'median': conversation_df['sentiment'].median(),
+                'std': conversation_df['sentiment'].std(),
+                'max': conversation_df['sentiment'].max(),
+                'min': conversation_df['sentiment'].min()
+            }
+        }
+        
+        # Calculate sentiment shifts (how sentiment changes between messages)
+        sentiment_shifts = conversation_df['sentiment'].diff()
+        sentiment_analysis['sentiment_volatility'] = sentiment_shifts.std()
+        
+        # Identify significant sentiment changes
+        significant_shifts = conversation_df[abs(sentiment_shifts) > 0.5]
+        if not significant_shifts.empty:
+            sentiment_analysis['significant_shifts'] = significant_shifts[['timestamp', 'sender', 'message', 'sentiment']].to_dict('records')
+        
+        return sentiment_analysis
     
     def plot_activity_patterns(self, save_path: str = None):
         """Plot daily and hourly activity patterns."""
@@ -119,21 +178,12 @@ class WhatsAppChatParser:
         plt.close()
     
     def segment_conversations(self, time_threshold_minutes: int = 60) -> List[pd.DataFrame]:
-        """
-        Segment messages into separate conversations based on time gaps.
-        A new conversation starts when there's a gap longer than time_threshold_minutes.
-        
-        Args:
-            time_threshold_minutes: Time gap (in minutes) to consider as a conversation break
-            
-        Returns:
-            List of DataFrames, each containing a separate conversation
-        """
+        """Segment messages into separate conversations based on time gaps."""
         if len(self.df) == 0:
             return []
         
-        # Sort messages by timestamp if not already sorted
-        df_sorted = self.df.sort_values('timestamp')
+        # Use original message order
+        df_sorted = self.df.copy()  # Changed from sort_values('timestamp')
         
         # Calculate time differences between consecutive messages
         time_diffs = df_sorted['timestamp'].diff()
@@ -144,7 +194,7 @@ class WhatsAppChatParser:
         # Assign conversation IDs
         conversation_ids = conversation_breaks.cumsum()
         
-        # Group messages by conversation ID
+        # Group messages by conversation ID while maintaining original order
         conversations = []
         for conv_id, conv_messages in df_sorted.groupby(conversation_ids):
             conv_data = conv_messages.copy()
@@ -380,6 +430,57 @@ Top 5 Longest Conversations:
         output += f"  Sentiment: {neg_msg['sentiment']:.3f}\n"
         
         return output
+
+    def analyze_all_conversations_sentiment(self, time_threshold_minutes: int = 60) -> Dict:
+        """Analyze sentiment patterns across all conversations."""
+        conversations = self.segment_conversations(time_threshold_minutes)
+        all_conv_sentiments = []
+        
+        for conv in conversations:
+            # Get sentiment for this conversation
+            conv_sentiment = self.analyze_conversation_sentiment(conv)
+            conv_data = {
+                'conversation_id': conv['conversation_id'].iloc[0],
+                'start_time': conv['timestamp'].min(),
+                'duration_minutes': (conv['timestamp'].max() - conv['timestamp'].min()).total_seconds() / 60,
+                'num_messages': len(conv),
+                'mean_sentiment': conv_sentiment['sentiment_stats']['mean'],
+                'sentiment_volatility': conv_sentiment['sentiment_volatility'],
+                'positive_ratio': conv_sentiment['sentiment_distribution']['positive'],
+                'negative_ratio': conv_sentiment['sentiment_distribution']['negative'],
+                'neutral_ratio': conv_sentiment['sentiment_distribution']['neutral'],
+                'most_positive_msg': conv_sentiment['most_positive_msg'],
+                'most_negative_msg': conv_sentiment['most_negative_msg']
+            }
+            all_conv_sentiments.append(conv_data)
+        
+        # Convert to DataFrame for easier analysis
+        conv_df = pd.DataFrame(all_conv_sentiments)
+        
+        # Calculate aggregate statistics
+        sentiment_stats = {
+            'total_conversations': len(conv_df),
+            'sentiment_distribution': {
+                'very_positive': len(conv_df[conv_df['mean_sentiment'] > 0.3]) / len(conv_df),
+                'positive': len(conv_df[(conv_df['mean_sentiment'] > 0.05) & (conv_df['mean_sentiment'] <= 0.3)]) / len(conv_df),
+                'neutral': len(conv_df[(conv_df['mean_sentiment'] >= -0.05) & (conv_df['mean_sentiment'] <= 0.05)]) / len(conv_df),
+                'negative': len(conv_df[(conv_df['mean_sentiment'] < -0.05) & (conv_df['mean_sentiment'] >= -0.3)]) / len(conv_df),
+                'very_negative': len(conv_df[conv_df['mean_sentiment'] < -0.3]) / len(conv_df)
+            },
+            'overall_stats': {
+                'mean_sentiment': conv_df['mean_sentiment'].mean(),
+                'median_sentiment': conv_df['mean_sentiment'].median(),
+                'std_sentiment': conv_df['mean_sentiment'].std(),
+                'mean_volatility': conv_df['sentiment_volatility'].mean()
+            },
+            'most_positive_conversation': conv_df.loc[conv_df['mean_sentiment'].idxmax()].to_dict() if not conv_df.empty else None,
+            'most_negative_conversation': conv_df.loc[conv_df['mean_sentiment'].idxmin()].to_dict() if not conv_df.empty else None,
+            'most_volatile_conversation': conv_df.loc[conv_df['sentiment_volatility'].idxmax()].to_dict() if not conv_df.empty else None,
+            'sentiment_progression': conv_df[['start_time', 'mean_sentiment']].values.tolist(),
+            'all_conversations': conv_df.to_dict('records')
+        }
+        
+        return sentiment_stats
 
 # Example usage
 if __name__ == "__main__":
