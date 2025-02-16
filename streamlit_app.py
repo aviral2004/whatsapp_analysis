@@ -7,6 +7,15 @@ from datetime import datetime
 import os
 import tempfile
 
+import pandas as pd
+import numpy as np
+from datetime import datetime
+import re
+from typing import List, Dict, Tuple
+from collections import defaultdict
+import matplotlib.pyplot as plt
+from textblob import TextBlob
+
 st.set_page_config(
     page_title="WhatsApp Chat Analyzer",
     page_icon="💬",
