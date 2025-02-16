@@ -4,7 +4,6 @@ from datetime import datetime
 import re
 from typing import List, Dict, Tuple
 from collections import defaultdict
-from sklearn.cluster import KMeans
 import matplotlib.pyplot as plt
 from textblob import TextBlob
 
