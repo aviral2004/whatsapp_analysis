@@ -1,11 +1,5 @@
 import streamlit as st
 import pandas as pd
-from parser import WhatsAppChatParser
-import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime
-import os
-import tempfile
 
 import pandas as pd
 import numpy as np
@@ -15,6 +9,13 @@ from typing import List, Dict, Tuple
 from collections import defaultdict
 import matplotlib.pyplot as plt
 from textblob import TextBlob
+
+from parser import WhatsAppChatParser
+import plotly.express as px
+import plotly.graph_objects as go
+from datetime import datetime
+import os
+import tempfile
 
 st.set_page_config(
     page_title="WhatsApp Chat Analyzer",
