@@ -53,6 +53,84 @@ def plot_conversation_patterns(conversations, time_threshold):
     
     return fig1, fig2
 
+def display_chat_message(msg, align="left"):
+    """Display a single chat message in a chat-like interface."""
+    # Define colors for different alignments
+    colors = {
+        "left": "#f0f0f0",
+        "right": "#DCF8C6"  # WhatsApp green color
+    }
+    
+    # Create a container for the message
+    with st.container():
+        cols = st.columns([1, 4, 1])
+        
+        # Choose which column to place the message in
+        col_idx = 1 if align == "left" else 1
+        
+        with cols[col_idx]:
+            # Message container with styling
+            st.markdown(
+                f"""
+                <div style="
+                    background-color: {colors[align]};
+                    padding: 10px;
+                    border-radius: 10px;
+                    margin: 5px;
+                    max-width: 100%;
+                    display: inline-block;
+                ">
+                    <p style="
+                        color: #666;
+                        font-size: 0.8em;
+                        margin: 0;
+                    ">{msg['sender']}</p>
+                    <p style="margin: 0;">{msg['message']}</p>
+                    <p style="
+                        color: #666;
+                        font-size: 0.7em;
+                        text-align: right;
+                        margin: 0;
+                    ">{msg['timestamp'].strftime('%I:%M %p')}</p>
+                </div>
+                """,
+                unsafe_allow_html=True
+            )
+
+def view_conversation(conversation_df, num_messages=50):
+    """Display a conversation in a chat-like interface."""
+    # Sort messages by timestamp
+    conv_messages = conversation_df.sort_values('timestamp')
+    
+    # Get unique participants
+    participants = conv_messages['sender'].unique()
+    
+    # Display basic conversation info
+    st.write(f"Total Messages: {len(conv_messages)}")
+    st.write(f"Participants: {', '.join(participants)}")
+    st.write(f"Duration: {(conv_messages['timestamp'].max() - conv_messages['timestamp'].min()).total_seconds() / 60:.1f} minutes")
+    
+    # Add a slider for message range
+    start_idx = st.slider(
+        "Message Range",
+        0,
+        max(0, len(conv_messages) - num_messages),
+        0,
+        help="Slide to view different parts of the conversation"
+    )
+    
+    # Display messages
+    messages_to_show = conv_messages.iloc[start_idx:start_idx + num_messages]
+    
+    # Create a container for the chat
+    chat_container = st.container()
+    
+    with chat_container:
+        for _, msg in messages_to_show.iterrows():
+            # Determine message alignment (you can customize this based on your needs)
+            align = "right" if msg['sender'] == participants[0] else "left"
+            display_chat_message(msg, align)
+
 def main():
     st.title("📱 WhatsApp Chat Analyzer")
     st.write("Upload your WhatsApp chat export file to analyze conversations and patterns.")
@@ -136,9 +214,42 @@ def main():
                 
                 for i, conv in enumerate(sorted_convs, 1):
                     with st.expander(f"{i}. {conv['start_time'].strftime('%Y-%m-%d %H:%M')} ({conv['duration_minutes']:.1f} min)"):
+                        # Basic stats
                         st.write(f"Messages: {conv['num_messages']}")
                         st.write(f"Participants: {', '.join(conv['participants'])}")
                         st.write(f"Most Active: {conv['most_active_sender']}")
+                        
+                        # Add a button to view the conversation
+                        if st.button(f"View Conversation #{i}", key=f"view_conv_{i}"):
+                            # Get the conversation messages
+                            conv_messages = conversations[conv['conversation_id']]
+                            
+                            # Create tabs for different views
+                            stats_tab, view_tab = st.tabs(["Statistics", "View Messages"])
+                            
+                            with stats_tab:
+                                # Show message distribution
+                                msg_dist = conv_messages['sender'].value_counts()
+                                fig = px.pie(
+                                    values=msg_dist.values,
+                                    names=msg_dist.index,
+                                    title="Message Distribution"
+                                )
+                                st.plotly_chart(fig)
+                                
+                                # Show message timeline
+                                timeline = conv_messages.set_index('timestamp')['sender'].reset_index()
+                                fig = px.scatter(
+                                    timeline,
+                                    x='timestamp',
+                                    y='sender',
+                                    title="Message Timeline",
+                                    height=200
+                                )
+                                st.plotly_chart(fig)
+                            
+                            with view_tab:
+                                view_conversation(conv_messages)
                 
                 # Activity Patterns
                 st.header("📈 Activity Patterns")
