@@ -57,8 +57,16 @@ def display_chat_message(msg, align="left"):
     """Display a single chat message in a chat-like interface."""
     # Define colors for different alignments
     colors = {
-        "left": "#f0f0f0",
-        "right": "#DCF8C6"  # WhatsApp green color
+        "left": {
+            "bg": "#f0f0f0",
+            "text": "#000000",
+            "meta": "#666666"
+        },
+        "right": {
+            "bg": "#DCF8C6",  # WhatsApp green color
+            "text": "#000000",
+            "meta": "#666666"
+        }
     }
     
     # Create a container for the message
@@ -73,21 +81,28 @@ def display_chat_message(msg, align="left"):
             st.markdown(
                 f"""
                 <div style="
-                    background-color: {colors[align]};
+                    background-color: {colors[align]['bg']};
                     padding: 10px;
                     border-radius: 10px;
                     margin: 5px;
                     max-width: 100%;
                     display: inline-block;
+                    box-shadow: 0 1px 2px rgba(0,0,0,0.1);
                 ">
                     <p style="
-                        color: #666;
+                        color: {colors[align]['meta']};
                         font-size: 0.8em;
                         margin: 0;
+                        font-weight: 500;
                     ">{msg['sender']}</p>
-                    <p style="margin: 0;">{msg['message']}</p>
                     <p style="
-                        color: #666;
+                        margin: 5px 0;
+                        color: {colors[align]['text']};
+                        font-size: 1em;
+                        line-height: 1.4;
+                    ">{msg['message']}</p>
+                    <p style="
+                        color: {colors[align]['meta']};
                         font-size: 0.7em;
                         text-align: right;
                         margin: 0;
@@ -206,6 +221,9 @@ def main():
                 col2.metric("Avg Duration (min)", f"{conv_stats['avg_conversation_duration']:.1f}")
                 col3.metric("Avg Messages/Conv", f"{conv_stats['avg_messages_per_conversation']:.1f}")
                 
+                # Get all conversations first
+                conversations = parser.segment_conversations(time_threshold)
+                
                 # Top 5 longest conversations
                 st.subheader("Longest Conversations")
                 sorted_convs = sorted(conv_stats['conversation_details'], 
@@ -251,6 +269,16 @@ def main():
                             with view_tab:
                                 view_conversation(conv_messages)
                 
+                # Conversation Patterns
+                st.header("🔄 Conversation Patterns")
+                fig1, fig2 = plot_conversation_patterns(conversations, time_threshold)
+                
+                tab1, tab2 = st.tabs(["Message Distribution", "Time Gaps"])
+                with tab1:
+                    st.plotly_chart(fig1)
+                with tab2:
+                    st.plotly_chart(fig2)
+                
                 # Activity Patterns
                 st.header("📈 Activity Patterns")
                 tab1, tab2 = st.tabs(["Daily Activity", "Hourly Activity"])
@@ -260,17 +288,6 @@ def main():
                 
                 with tab2:
                     st.plotly_chart(plot_hourly_activity(parser.df))
-                
-                # Conversation Patterns
-                st.header("🔄 Conversation Patterns")
-                conversations = parser.segment_conversations(time_threshold)
-                fig1, fig2 = plot_conversation_patterns(conversations, time_threshold)
-                
-                tab1, tab2 = st.tabs(["Message Distribution", "Time Gaps"])
-                with tab1:
-                    st.plotly_chart(fig1)
-                with tab2:
-                    st.plotly_chart(fig2)
                 
                 # Response Times
                 st.header("⏱️ Response Times")
