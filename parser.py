@@ -5,7 +5,6 @@ import re
 from typing import List, Dict, Tuple
 from collections import defaultdict
 import matplotlib.pyplot as plt
-from textblob import TextBlob
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 
 class WhatsAppChatParser:
